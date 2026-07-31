@@ -34,6 +34,7 @@ using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Nodes.Screens.GameOverScreen;
 using MegaCrit.Sts2.Core.Nodes.Screens.Timeline;
@@ -1284,6 +1285,15 @@ public static partial class McpMod
             return ExecuteLoadLobbyMenuOption(loadLobby, option);
         }
 
+        // Custom-run screen — a separate class from NCharacterSelectScreen with its
+        // own character buttons, seed input, and confirm button. Checked first: it is
+        // the only screen that supports seeded singleplayer embarks.
+        var customRun = FindFirst<NCustomRunScreen>(tree.Root);
+        if (customRun != null && IsNodeVisible(customRun))
+        {
+            return ExecuteCustomRunMenuOption(customRun, option, seed);
+        }
+
         // Character select can outlive or be mounted separately from NMainMenu,
         // so handle it before main-menu-specific routing.
         var charSelect = FindFirst<NCharacterSelectScreen>(tree.Root);
@@ -1657,6 +1667,84 @@ public static partial class McpMod
                     return Error($"Character '{option}' is locked");
                 btn.Select();
                 return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = $"Selected {SafeGetText(() => btn.Character.Title)}. Use 'confirm' to embark." };
+            }
+        }
+        return Error($"Character '{option}' not found. Available: {string.Join(", ", buttons.Where(b => !b.IsLocked).Select(b => b.Character?.Id.Entry))}");
+    }
+
+    private static Dictionary<string, object?> ExecuteCustomRunMenuOption(
+        NCustomRunScreen customRun,
+        string option,
+        string? seed)
+    {
+        seed = string.IsNullOrWhiteSpace(seed) ? null : seed.Trim();
+
+        if (string.Equals(option, "back", System.StringComparison.OrdinalIgnoreCase))
+        {
+            var backBtn = GetInstanceFieldValue(customRun, "_backButton") as NClickableControl;
+            if (backBtn != null && backBtn.IsEnabled && IsControlVisibleOrActionable(backBtn))
+            {
+                backBtn.ForceClick();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Going back" };
+            }
+            return Error("Back button not available");
+        }
+
+        // MP only: retract the ready vote after embark (NCustomRunScreen
+        // enables _unreadyButton in OnEmbarkPressed for multiplayer lobbies;
+        // in SP it never enables). Mirrors ExecuteCharacterSelectMenuOption.
+        if (string.Equals(option, "unready", System.StringComparison.OrdinalIgnoreCase))
+        {
+            var unreadyBtn = GetInstanceFieldValue(customRun, "_unreadyButton") as NClickableControl;
+            if (unreadyBtn != null && unreadyBtn.IsEnabled && IsControlVisibleOrActionable(unreadyBtn))
+            {
+                unreadyBtn.ForceClick();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = "Retracted ready vote" };
+            }
+            return Error("Unready button not available — you have not confirmed yet");
+        }
+
+        if (string.Equals(option, "confirm", System.StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(option, "embark", System.StringComparison.OrdinalIgnoreCase))
+        {
+            if (seed != null)
+            {
+                var lobby = customRun.Lobby;
+                if (lobby == null)
+                {
+                    return Error("Custom run lobby not initialized. Seed was not applied and the run was not started.");
+                }
+                try
+                {
+                    lobby.SetSeed(seed);
+                }
+                catch (System.Exception ex)
+                {
+                    return Error($"Setting seed failed before starting the run: {ex.Message}");
+                }
+            }
+
+            var confirmBtn = GetInstanceFieldValue(customRun, "_confirmButton");
+            if (confirmBtn is NClickableControl confirmClickable && confirmClickable.IsEnabled)
+            {
+                var msg = string.IsNullOrEmpty(seed) ? "Embarking on custom run" : $"Embarking on custom run (seed: {seed})";
+                confirmClickable.ForceClick();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = msg };
+            }
+            return Error("Confirm button not available — select a character first");
+        }
+
+        var buttons = FindAll<NCharacterSelectButton>(customRun);
+        foreach (var btn in buttons)
+        {
+            if (btn.Character != null && (
+                string.Equals(btn.Character.Id.Entry, option, System.StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(SafeGetText(() => btn.Character.Title), option, System.StringComparison.OrdinalIgnoreCase)))
+            {
+                if (btn.IsLocked)
+                    return Error($"Character '{option}' is locked");
+                btn.Select();
+                return new Dictionary<string, object?> { ["status"] = "ok", ["message"] = $"Selected {SafeGetText(() => btn.Character.Title)}. Use 'confirm' to embark (pass seed to seed the run)." };
             }
         }
         return Error($"Character '{option}' not found. Available: {string.Join(", ", buttons.Where(b => !b.IsLocked).Select(b => b.Character?.Id.Entry))}");

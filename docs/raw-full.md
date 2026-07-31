@@ -321,6 +321,45 @@ The same screen drives SP, MP host, and MP client. In MP, an additional `lobby` 
 
 In SP the `lobby` field is omitted, and `unready` does not appear (the unready button is only enabled after MP ready).
 
+#### `custom_run` — Custom run setup (seeded runs)
+
+`NCustomRunScreen` — a separate class from `NCharacterSelectScreen`, reached
+via main menu → `singleplayer` → `custom` (or as the MP custom lobby). This
+is the **only screen that supports seeded singleplayer embarks**.
+
+```jsonc
+{
+  "state_type": "menu",
+  "menu_screen": "custom_run",
+  "message": "Custom run setup. ...",
+  "seed": null,                    // current lobby seed (null = random)
+  "ascension": 0,
+  "lobby": { /* present only in MP; same shape as character_select */ },
+  "options": [
+    { "name": "IRONCLAD", "enabled": true },
+    /* ... other characters ... */
+    { "name": "confirm",  "enabled": true },
+    { "name": "embark",   "enabled": true },   // alias of confirm
+    { "name": "back",     "enabled": true },
+    { "name": "unready",  "enabled": false }   // MP only
+  ]
+}
+```
+
+Actions (all via `menu_select`):
+
+```jsonc
+{ "action": "menu_select", "option": "IRONCLAD" }                          // select character
+{ "action": "menu_select", "option": "confirm", "seed": "26ZNY27HK8" }    // set seed via Lobby.SetSeed, then embark
+{ "action": "menu_select", "option": "confirm" }                          // embark unseeded (random seed)
+{ "action": "menu_select", "option": "back" }
+```
+
+Modifiers and act selection are not exposed (default custom run only).
+Note: custom runs do not record progression/unlocks and skip the
+Standard-only discovery-order encounter modifications; the RNG streams for
+a given seed are identical to Standard.
+
 ### `unknown`
 
 Run state or room type not recognized.

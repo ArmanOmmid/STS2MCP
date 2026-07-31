@@ -40,6 +40,7 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Models.RelicPools;
 using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
+using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
@@ -191,6 +192,17 @@ public static partial class McpMod
                     if (loadLobby != null && IsNodeVisible(loadLobby))
                     {
                         AddMultiplayerLoadLobbyMenuState(result, loadLobby);
+                    }
+                }
+
+                // Custom-run screen — separate class from NCharacterSelectScreen; the
+                // only seeded-singleplayer entry point. Checked before char select.
+                if (result.ContainsKey("menu_screen") == false)
+                {
+                    var customRun = FindFirst<NCustomRunScreen>(tree.Root);
+                    if (customRun != null && IsNodeVisible(customRun))
+                    {
+                        AddCustomRunMenuState(result, customRun);
                     }
                 }
 
@@ -618,6 +630,87 @@ public static partial class McpMod
         }
 
         return result;
+    }
+
+    private static void AddCustomRunMenuState(
+        Dictionary<string, object?> result,
+        NCustomRunScreen customRun)
+    {
+        result["state_type"] = "menu";
+        result["menu_screen"] = "custom_run";
+        result["message"] = "Custom run setup. Select a character, then 'confirm' to embark; pass menu_select's seed field with confirm to seed the run.";
+
+        var options = new List<Dictionary<string, object?>>();
+        foreach (var btn in FindAll<NCharacterSelectButton>(customRun))
+        {
+            try
+            {
+                if (btn.Character is { } cm && IsNodeVisible(btn))
+                {
+                    options.Add(new Dictionary<string, object?>
+                    {
+                        ["name"] = cm.Id.Entry,
+                        ["enabled"] = !btn.IsLocked
+                    });
+                }
+            }
+            catch { }
+        }
+
+        var confirmBtn = GetInstanceFieldValue(customRun, "_confirmButton");
+        if (confirmBtn is NClickableControl confirmClickable && IsNodeVisible(confirmClickable))
+        {
+            options.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "confirm",
+                ["enabled"] = confirmClickable.IsEnabled
+            });
+            options.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "embark",
+                ["enabled"] = confirmClickable.IsEnabled
+            });
+        }
+
+        var backBtn = GetInstanceFieldValue(customRun, "_backButton");
+        if (backBtn is NClickableControl backClickable && IsNodeVisible(backClickable))
+        {
+            options.Add(new Dictionary<string, object?>
+            {
+                ["name"] = "back",
+                ["enabled"] = backClickable.IsEnabled
+            });
+        }
+
+        try
+        {
+            var lobby = customRun.Lobby;
+            if (lobby != null)
+            {
+                result["seed"] = lobby.Seed;
+                result["ascension"] = lobby.Ascension;
+                if (lobby.NetService != null && lobby.NetService.Type.IsMultiplayer())
+                {
+                    result["lobby"] = BuildStartRunLobbyState(lobby);
+
+                    // _unreadyButton only has a role in MP (see the char-select
+                    // builder for the same reasoning).
+                    var unreadyBtn = GetInstanceFieldValue(customRun, "_unreadyButton");
+                    if (unreadyBtn is NClickableControl unreadyClickable && IsNodeVisible(unreadyClickable))
+                    {
+                        options.Add(new Dictionary<string, object?>
+                        {
+                            ["name"] = "unready",
+                            ["enabled"] = unreadyClickable.IsEnabled
+                        });
+                    }
+                }
+            }
+        }
+        catch { }
+
+        if (options.Count > 0)
+            result["options"] = options;
     }
 
     private static void AddCharacterSelectMenuState(

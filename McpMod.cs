@@ -85,6 +85,11 @@ public static partial class McpMod
             // Optional settings UI patches should not block the HTTP bridge itself.
             TryApplyHarmonyPatches();
 
+            // Host-side seam #2 for the standalone event log: inject the
+            // state snapshotter (dependency inversion — EventLog never
+            // references our builders). Called from main-thread hook sites.
+            Sts2EventLog.EventLog.StateProvider = () => BuildGameState();
+
             // Connect to main thread process frame for action execution
             var tree = (SceneTree)Engine.GetMainLoop();
             tree.Connect(SceneTree.SignalName.ProcessFrame, Callable.From(ProcessMainThreadQueue));
@@ -113,14 +118,24 @@ public static partial class McpMod
 
     private static void TryApplyHarmonyPatches()
     {
-        try
+        // Patch class-by-class so one broken hook (e.g. a synchronizer
+        // signature drifting in a game update) cannot silently take down
+        // every other patch — the settings UI and the event log are
+        // independent consumers with independent failure modes.
+        var harmony = new Harmony("com.sts2mcp");
+        foreach (var type in System.Reflection.Assembly.GetExecutingAssembly().GetTypes())
         {
-            new Harmony("com.sts2mcp").PatchAll();
-        }
-        catch (Exception ex)
-        {
-            GD.Print(
-                $"[STS2 MCP] Optional Harmony settings UI injection skipped: {ex.GetType().Name}: {ex.Message}");
+            if (type.GetCustomAttributes(typeof(HarmonyPatch), inherit: true).Length == 0)
+                continue;
+            try
+            {
+                new PatchClassProcessor(harmony, type).Patch();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr(
+                    $"[STS2 MCP] Harmony patch FAILED for {type.FullName}: {ex.GetType().Name}: {ex.Message}");
+            }
         }
     }
 
@@ -257,6 +272,22 @@ public static partial class McpMod
             {
                 if (request.HttpMethod == "GET")
                     HandleGetWiki(request, response);
+                else
+                    SendError(response, 405, "Method not allowed");
+            }
+            else if (path == "/api/v1/events")
+            {
+                // Local-action event log — standalone module; this route is
+                // its single seam into the mod (see McpMod.EventLog.cs).
+                if (request.HttpMethod == "GET")
+                {
+                    long since = 0;
+                    long.TryParse(request.QueryString["since"], out since);
+                    int? last = null;
+                    if (int.TryParse(request.QueryString["last"], out var lastN))
+                        last = lastN;
+                    SendJson(response, Sts2EventLog.EventLog.BuildEventsResponse(since, last));
+                }
                 else
                     SendError(response, 405, "Method not allowed");
             }

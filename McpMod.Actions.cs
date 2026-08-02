@@ -92,14 +92,67 @@ public static partial class McpMod
         };
     }
 
+    // A combat command arriving while the enemy turn is finishing or a prior
+    // card is still resolving is a request to act as soon as legal — wait the
+    // transient window out instead of rejecting, exactly as a human's click
+    // lands after the animation. Safe to block here: HandleRequest runs on
+    // the ThreadPool (McpMod.cs), never the game thread that clears these
+    // flags. False = the window never opened; callers re-run the original
+    // guards so the error names the still-closed gate.
+    private const int PlayWindowTimeoutMs = 5000;
+    private const int PlayWindowPollMs = 30;
+
+    private static bool WaitForPlayWindow(Player player)
+    {
+        long deadline = System.Environment.TickCount64 + PlayWindowTimeoutMs;
+        while (System.Environment.TickCount64 < deadline)
+        {
+            if (!CombatManager.Instance.IsInProgress)
+                return false;
+            // ActionQueueSet.IsEmpty is the engine's real "settled" signal:
+            // PlayerActionsDisabled is an independently-set flag that stays
+            // false while queued resolution work (e.g. a played card's
+            // draws) is still mutating the hand — validating indices
+            // before the queue drains reads a transient hand.
+            if (IsPlayPhase(player)
+                && !CombatManager.Instance.PlayerActionsDisabled
+                && RunManager.Instance.ActionQueueSet.IsEmpty)
+                return true;
+            System.Threading.Thread.Sleep(PlayWindowPollMs);
+        }
+        return false;
+    }
+
+    // Play-phase-agnostic variant for actions the game allows outside the
+    // play phase (anytime potions): wait only for enabled + queue drained.
+    // Combat ending while waiting is success — the action is legal outside.
+    private static bool WaitForSettledWindow()
+    {
+        long deadline = System.Environment.TickCount64 + PlayWindowTimeoutMs;
+        while (System.Environment.TickCount64 < deadline)
+        {
+            if (!CombatManager.Instance.IsInProgress)
+                return true;
+            if (!CombatManager.Instance.PlayerActionsDisabled
+                && RunManager.Instance.ActionQueueSet.IsEmpty)
+                return true;
+            System.Threading.Thread.Sleep(PlayWindowPollMs);
+        }
+        return false;
+    }
+
     private static Dictionary<string, object?> ExecutePlayCard(Player player, Dictionary<string, JsonElement> data)
     {
         if (!CombatManager.Instance.IsInProgress)
             return Error("Not in combat");
-        if (!IsPlayPhase(player))
-            return Error("Not in play phase - cannot act during enemy turn");
-        if (CombatManager.Instance.PlayerActionsDisabled)
+        if (!WaitForPlayWindow(player))
+        {
+            if (!CombatManager.Instance.IsInProgress)
+                return Error("Not in combat");
+            if (!IsPlayPhase(player))
+                return Error("Not in play phase - cannot act during enemy turn");
             return Error("Player actions are currently disabled");
+        }
         if (!player.Creature.IsAlive)
             return Error("Player creature is dead - cannot play cards");
 
@@ -151,10 +204,14 @@ public static partial class McpMod
     {
         if (!CombatManager.Instance.IsInProgress)
             return Error("Not in combat");
-        if (!IsPlayPhase(player))
-            return Error("Not in play phase - cannot act during enemy turn");
-        if (CombatManager.Instance.PlayerActionsDisabled)
+        if (!WaitForPlayWindow(player))
+        {
+            if (!CombatManager.Instance.IsInProgress)
+                return Error("Not in combat");
+            if (!IsPlayPhase(player))
+                return Error("Not in play phase - cannot act during enemy turn");
             return Error("Player actions are currently disabled (turn may already be ending)");
+        }
 
         // Match the game's own CanTurnBeEnded guard (NEndTurnButton.cs:114-123)
         var hand = NCombatRoom.Instance?.Ui?.Hand;
@@ -201,13 +258,18 @@ public static partial class McpMod
         {
             if (!inCombat)
                 return Error($"Potion '{SafeGetText(() => potion.Title)}' can only be used in combat");
-            if (!IsPlayPhase(player))
-                return Error("Cannot use potions outside of play phase");
+            if (!WaitForPlayWindow(player))
+            {
+                if (!IsPlayPhase(player))
+                    return Error("Cannot use potions outside of play phase");
+                return Error("Player actions are currently disabled");
+            }
         }
         else if (potion.Usage == PotionUsage.Automatic)
             return Error($"Potion '{SafeGetText(() => potion.Title)}' is automatic and cannot be manually used");
-
-        if (inCombat && CombatManager.Instance.PlayerActionsDisabled)
+        // Anytime potions keep their original latitude (usable in combat
+        // outside the play phase) — wait only for the settled window.
+        else if (inCombat && !WaitForSettledWindow())
             return Error("Player actions are currently disabled");
 
         // Resolve target

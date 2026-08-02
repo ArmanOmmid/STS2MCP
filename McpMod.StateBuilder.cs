@@ -1170,6 +1170,9 @@ public static partial class McpMod
         // (Actions.cs) — without it clients cannot tell "ready to act" from
         // "mid-resolution animation" while is_play_phase is already true.
         battle["actions_disabled"] = CombatManager.Instance.PlayerActionsDisabled;
+        // Engine work queue drained — false while queued resolution (draws,
+        // exhausts) is still mutating combat state (RunManager.cs:157).
+        battle["engine_idle"] = RunManager.Instance.ActionQueueSet.IsEmpty;
 
         // Enemies
         var enemies = new List<Dictionary<string, object?>>();

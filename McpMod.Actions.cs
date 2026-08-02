@@ -328,7 +328,13 @@ public static partial class McpMod
             return Error($"No potion in slot {slot}");
 
         string potionName = SafeGetText(() => potion.Title) ?? "unknown";
-        _ = PotionCmd.Discard(potion);
+        // Enqueue exactly like the UI's discard button (NPotionPopup.cs:333)
+        // instead of calling PotionCmd.Discard directly: the queue is the
+        // engine's intent layer — bypassing it makes API discards invisible
+        // to observers hooking the action layer.
+        RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
+            new MegaCrit.Sts2.Core.GameActions.DiscardPotionGameAction(
+                player, (uint)slot, CombatManager.Instance.IsInProgress));
 
         return new Dictionary<string, object?>
         {

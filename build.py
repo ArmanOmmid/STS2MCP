@@ -10,7 +10,7 @@ Produces:
 Install by copying all three into <game>/mods/.
 
 Usage:
-    python build.py                       # default port 15152 (1+STS2), auto-detect Steam
+    python build.py                       # DEFAULT_PORT below, auto-detect Steam
     python build.py --port 15526
     python build.py --game-dir "D:/SteamLibrary/steamapps/common/Slay the Spire 2"
 
@@ -26,6 +26,11 @@ import platform
 import shutil
 import subprocess
 import sys
+
+# Our local port scheme: 15152 = EventLog mod (sts2-headless), 15153 = MCP.
+# Written into build/STS2_MCP.conf; without a conf the mod falls back to
+# its upstream default 15526.
+DEFAULT_PORT = 15153
 
 REPO = os.path.dirname(os.path.abspath(__file__))
 BUILD_DIR = os.path.join(REPO, "build")
@@ -66,8 +71,9 @@ def find_game_dir(explicit):
 
 def main():
     parser = argparse.ArgumentParser(description="Build STS2_MCP into build/")
-    parser.add_argument("--port", type=int, default=15152,
-                        help="localhost port for the mod's HTTP server (default: 15152; mod falls back to 15526 without a conf)")
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT,
+                        help="localhost port for the mod's HTTP server (default: "
+                             "%(default)s; mod falls back to 15526 without a conf)")
     parser.add_argument("--game-dir", help="Slay the Spire 2 install directory")
     parser.add_argument("--configuration", default="Release", choices=["Debug", "Release"])
     args = parser.parse_args()

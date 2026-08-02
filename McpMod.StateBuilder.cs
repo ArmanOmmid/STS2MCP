@@ -1166,6 +1166,10 @@ public static partial class McpMod
         battle["round"] = combatState.RoundNumber;
         battle["turn"] = combatState.CurrentSide.ToString().ToLower();
         battle["is_play_phase"] = IsPlayPhase(combatState);
+        // The transient gate ExecutePlayCard/ExecuteEndTurn reject on
+        // (Actions.cs) — without it clients cannot tell "ready to act" from
+        // "mid-resolution animation" while is_play_phase is already true.
+        battle["actions_disabled"] = CombatManager.Instance.PlayerActionsDisabled;
 
         // Enemies
         var enemies = new List<Dictionary<string, object?>>();

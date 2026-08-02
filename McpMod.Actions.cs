@@ -161,7 +161,14 @@ public static partial class McpMod
         if (hand != null && (hand.InCardPlay || hand.CurrentMode != NPlayerHand.Mode.Play))
             return Error("Cannot end turn while a card is being played or hand is in selection mode");
 
-        PlayerCmd.EndTurn(player, canBackOut: false);
+        // Enqueue exactly like the UI's end-turn button (NEndTurnButton.cs:608)
+        // instead of calling PlayerCmd.EndTurn directly: the queue is the
+        // engine's INTENT layer — going through it keeps API-driven end turns
+        // serialized with card plays and indistinguishable from clicks
+        // (observers hooking the action layer see both).
+        RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(
+            new MegaCrit.Sts2.Core.GameActions.EndPlayerTurnAction(
+                player, player.PlayerCombatState!.TurnNumber));
 
         return new Dictionary<string, object?>
         {
@@ -427,8 +434,14 @@ public static partial class McpMod
     private static Dictionary<string, object?> ExecuteChooseMapNode(Dictionary<string, JsonElement> data)
     {
         var mapScreen = NMapScreen.Instance;
-        if (mapScreen == null || (!mapScreen.IsOpen && !IsNodeVisible(mapScreen)))
+        if (mapScreen == null)
             return Error("Map screen is not open");
+        if (!mapScreen.IsOpen && !IsNodeVisible(mapScreen))
+            // A map choice implies opening the map, exactly like the top-bar
+            // map button a human would press (NMapScreen.Open, :1457) — e.g.
+            // choosing the next node straight from a lingering rewards or
+            // shop screen.
+            mapScreen.Open(isOpenedFromTopBar: true);
 
         if (!data.TryGetValue("index", out var indexElem))
             return Error("Missing 'index' (map node index from next_options)");

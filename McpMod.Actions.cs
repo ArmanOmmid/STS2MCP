@@ -504,12 +504,16 @@ public static partial class McpMod
         var mapScreen = NMapScreen.Instance;
         if (mapScreen == null)
             return Error("Map screen is not open");
+        // A map choice implies opening the map, exactly like the top-bar
+        // map button a human would press (NMapScreen.Open, :1457) — e.g.
+        // choosing the next node straight from a lingering rewards or shop
+        // screen. Remember whether WE opened it, so we can put it back.
+        bool weOpenedIt = false;
         if (!mapScreen.IsOpen && !IsNodeVisible(mapScreen))
-            // A map choice implies opening the map, exactly like the top-bar
-            // map button a human would press (NMapScreen.Open, :1457) — e.g.
-            // choosing the next node straight from a lingering rewards or
-            // shop screen.
+        {
             mapScreen.Open(isOpenedFromTopBar: true);
+            weOpenedIt = true;
+        }
 
         if (!data.TryGetValue("index", out var indexElem))
             return Error("Missing 'index' (map node index from next_options)");
@@ -529,6 +533,14 @@ public static partial class McpMod
         var target = travelable[index];
         var pt = target.Point!;
         mapScreen.OnMapPointSelectedLocally(target);
+
+        // Close what we opened. Travelling normally closes the map through
+        // RunManager.ClearScreens during the room transition, but a map we
+        // opened from another screen can outlive that and sit on top of the
+        // room we just entered — blocking every action aimed at it (seen
+        // live: an event room unreachable behind an open map).
+        if (weOpenedIt && mapScreen.IsOpen)
+            mapScreen.Close(animateOut: false);
 
         return new Dictionary<string, object?>
         {
